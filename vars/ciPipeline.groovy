@@ -30,6 +30,7 @@ def call(Map config = [:]) {
                             git url: env.BITBUCKET_GIT_URL,
                                 branch: env.BRANCH_NAME,
                                 credentialsId: BITBUCKET_GIT_CREDS_ID
+                                refspec: '+refs/heads/*:refs/remotes/origin/*'
                             
                         } else {
                             // --- IF IT'S A GITHUB BUILD ---
