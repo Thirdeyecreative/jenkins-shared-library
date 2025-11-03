@@ -10,7 +10,7 @@ def call(Map config = [:]) {
 
         environment {
             SONAR_AUTH_TOKEN = credentials('sonar-global-token')
-            // Credential ID for Bitbucket Git checkout
+            // Credential ID for Bitbucket Git checkout (with username 'devops.thirdeyecreative')
             BITBUCKET_GIT_CREDS_ID = 'devops.thirdeyecreative' 
         }
 
@@ -19,26 +19,21 @@ def call(Map config = [:]) {
             stage('Checkout Code') {
                 steps {
                     script {
-                        // This is the new, more robust check.
-                        // It checks the class of the SCM object itself.
-                        if (scm.getClass().getName().contains('BitbucketSCMSource')) {
+                        // This is the new, robust check.
+                        // The BITBUCKET_GIT_URL variable IS available here.
+                        if (env.BITBUCKET_GIT_URL) {
                             
                             // --- IF IT'S A BITBUCKET BUILD ---
-                            echo "Bitbucket SCM detected. Overriding checkout credentials."
+                            echo "Bitbucket build detected. Running explicit git checkout."
                             
-                            // 1. Get the SCM definition from the job
-                            def bitbucketScm = scm
-                            
-                            // 2. FORCE the credentialId to be our Git credential
-                            // This is the most important part.
-                            bitbucketScm.userRemoteConfigs[0].credentialsId = BITBUCKET_GIT_CREDS_ID
-                            
-                            // 3. Now, call checkout with the *modified* scm object
-                            checkout bitbucketScm
+                            // This is the explicit 'git' step. It bypasses 'scm' completely.
+                            git url: env.BITBUCKET_GIT_URL,
+                                branch: env.BRANCH_NAME,
+                                credentialsId: BITBUCKET_GIT_CREDS_ID
                             
                         } else {
                             // --- IF IT'S A GITHUB BUILD ---
-                            echo "GitHub SCM detected. Running standard checkout scm."
+                            echo "GitHub build detected. Running standard checkout scm."
                             // This will run for your GitHub builds and will work correctly.
                             checkout scm
                         }
@@ -53,7 +48,6 @@ def call(Map config = [:]) {
                             if (env.CHANGE_ID) {
                                 echo "INFO: Pull Request build detected. Running SonarQube PR analysis."
                                 
-                                // This logic correctly finds the PR branch name for BOTH platforms
                                 def prBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME
 
                                 sh """
