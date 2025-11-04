@@ -1,41 +1,42 @@
-// This is the universal script for both Bitbucket and GitHub (Final Version)
+// Universal Jenkins shared library script for both Bitbucket & GitHub
 def call(Map config = [:]) {
     pipeline {
         agent { label 'debian-master' }
 
-        // This IS still needed to stop the broken default checkout
         options {
             skipDefaultCheckout true
         }
 
         environment {
             SONAR_AUTH_TOKEN = credentials('sonar-global-token')
-            // Credential ID for Bitbucket Git checkout (with username 'devops.thirdeyecreative')
-            BITBUCKET_GIT_CREDS_ID = 'devops.thirdeyecreative' 
+            // Use unified credential for Bitbucket
+            BITBUCKET_GIT_CREDS_ID = 'bitbucket-api-scan-creds'
         }
 
         stages {
-            
+
             stage('Checkout Code') {
                 steps {
                     script {
-                        // This is the new, robust check.
-                        // The BITBUCKET_GIT_URL variable IS available here.
-                        if (env.BITBUCKET_GIT_URL) {
-                            
-                            // --- IF IT'S A BITBUCKET BUILD ---
-                            echo "Bitbucket build detected. Running explicit git checkout."
-                            
-                            // This is the explicit 'git' step. It bypasses 'scm' completely.
-                            git url: env.BITBUCKET_GIT_URL,
-                                branch: env.BRANCH_NAME,
-                                credentialsId: BITBUCKET_GIT_CREDS_ID
-                                refspec: '+refs/heads/*:refs/remotes/origin/*'
-                            
+                        // --- Detect Bitbucket or GitHub context ---
+                        if (env.BITBUCKET_REPO_OWNER || env.BITBUCKET_GIT_HTTP_ORIGIN || env.BITBUCKET_GIT_URL) {
+                            echo "Bitbucket build detected. Running explicit checkout..."
+
+                            // Fall back gracefully if env.BITBUCKET_GIT_URL is missing
+                            def repoUrl = env.BITBUCKET_GIT_URL ?: "https://bitbucket.org/${env.BITBUCKET_REPO_OWNER}/${env.BITBUCKET_REPO_SLUG}.git"
+                            def branchName = env.BRANCH_NAME ?: "main"
+
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${branchName}"]],
+                                userRemoteConfigs: [[
+                                    url: repoUrl,
+                                    credentialsId: BITBUCKET_GIT_CREDS_ID
+                                ]]
+                            ])
+
                         } else {
-                            // --- IF IT'S A GITHUB BUILD ---
-                            echo "GitHub build detected. Running standard checkout scm."
-                            // This will run for your GitHub builds and will work correctly.
+                            echo "GitHub build detected. Using default checkout scm."
                             checkout scm
                         }
                     }
@@ -47,10 +48,8 @@ def call(Map config = [:]) {
                     script {
                         withSonarQubeEnv('MySonarQube') {
                             if (env.CHANGE_ID) {
-                                echo "INFO: Pull Request build detected. Running SonarQube PR analysis."
-                                
+                                echo "PR build detected. Running SonarQube PR analysis..."
                                 def prBranch = env.CHANGE_BRANCH ?: env.BRANCH_NAME
-
                                 sh """
                                     sonar-scanner \
                                     -Dsonar.login=${SONAR_AUTH_TOKEN} \
@@ -59,7 +58,7 @@ def call(Map config = [:]) {
                                     -Dsonar.pullrequest.key=${env.CHANGE_ID}
                                 """
                             } else {
-                                echo "INFO: Branch push detected. Running standard SonarQube branch analysis."
+                                echo "Branch build detected. Running standard SonarQube analysis..."
                                 sh "sonar-scanner -Dsonar.login=${SONAR_AUTH_TOKEN}"
                             }
                         }
@@ -72,11 +71,9 @@ def call(Map config = [:]) {
                     script {
                         if (config.buildCommands) {
                             echo "Running custom build commands..."
-                            config.buildCommands.each { command ->
-                                sh command
-                            }
+                            config.buildCommands.each { cmd -> sh cmd }
                         } else {
-                            echo "No build commands provided. Skipping."
+                            echo "No build commands provided. Skipping build stage."
                         }
                     }
                 }
